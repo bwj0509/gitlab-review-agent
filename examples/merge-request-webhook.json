@@ -1,0 +1,10 @@
+{
+  "object_kind": "merge_request",
+  "project": {
+    "id": 123
+  },
+  "object_attributes": {
+    "iid": 10,
+    "action": "open"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "gitlab-mr-review-bot",
+  "version": "0.1.0",
+  "description": "Minimal GitLab MR webhook bot that posts a note to merge requests.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "gitlab",
+    "merge-request",
+    "webhook",
+    "bot"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
+  }
+}
