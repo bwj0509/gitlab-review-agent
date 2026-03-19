@@ -1,11 +1,13 @@
 const { AI_REVIEW_MARKER, GITLAB_BASE_URL, GITLAB_BOT_TOKEN } = require("../config/env");
+const { logError, logInfo } = require("../lib/logger");
 
-async function gitlabApiRequest({ endpoint, method = "GET", body }) {
+async function gitlabApiRequest({ endpoint, method = "GET", body, requestId }) {
   if (!GITLAB_BASE_URL || !GITLAB_BOT_TOKEN) {
     throw new Error("GITLAB_BASE_URL or GITLAB_BOT_TOKEN is not configured");
   }
 
   const normalizedBaseUrl = GITLAB_BASE_URL.replace(/\/+$/, "");
+  const startedAt = Date.now();
   const response = await fetch(`${normalizedBaseUrl}${endpoint}`, {
     method,
     headers: {
@@ -17,8 +19,24 @@ async function gitlabApiRequest({ endpoint, method = "GET", body }) {
 
   if (!response.ok) {
     const responseText = await response.text();
+    logError("gitlab_api_request_failed", {
+      requestId,
+      method,
+      endpoint,
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+      message: responseText
+    });
     throw new Error(`GitLab API error ${response.status}: ${responseText}`);
   }
+
+  logInfo("gitlab_api_request_completed", {
+    requestId,
+    method,
+    endpoint,
+    status: response.status,
+    durationMs: Date.now() - startedAt
+  });
 
   if (response.status === 204) {
     return null;
@@ -27,42 +45,46 @@ async function gitlabApiRequest({ endpoint, method = "GET", body }) {
   return response.json();
 }
 
-async function getMergeRequest(projectId, mergeRequestIid) {
+async function getMergeRequest(projectId, mergeRequestIid, requestId) {
   return gitlabApiRequest({
     endpoint:
       `/api/v4/projects/${encodeURIComponent(projectId)}` +
-      `/merge_requests/${encodeURIComponent(mergeRequestIid)}`
+      `/merge_requests/${encodeURIComponent(mergeRequestIid)}`,
+    requestId
   });
 }
 
-async function getMergeRequestChanges(projectId, mergeRequestIid) {
+async function getMergeRequestChanges(projectId, mergeRequestIid, requestId) {
   return gitlabApiRequest({
     endpoint:
       `/api/v4/projects/${encodeURIComponent(projectId)}` +
-      `/merge_requests/${encodeURIComponent(mergeRequestIid)}/changes`
+      `/merge_requests/${encodeURIComponent(mergeRequestIid)}/changes`,
+    requestId
   });
 }
 
-async function createMergeRequestNote(projectId, mergeRequestIid, body) {
+async function createMergeRequestNote(projectId, mergeRequestIid, body, requestId) {
   return gitlabApiRequest({
     endpoint:
       `/api/v4/projects/${encodeURIComponent(projectId)}` +
       `/merge_requests/${encodeURIComponent(mergeRequestIid)}/notes`,
     method: "POST",
-    body: { body }
+    body: { body },
+    requestId
   });
 }
 
-async function getMergeRequestNotes(projectId, mergeRequestIid) {
+async function getMergeRequestNotes(projectId, mergeRequestIid, requestId) {
   return gitlabApiRequest({
     endpoint:
       `/api/v4/projects/${encodeURIComponent(projectId)}` +
-      `/merge_requests/${encodeURIComponent(mergeRequestIid)}/notes`
+      `/merge_requests/${encodeURIComponent(mergeRequestIid)}/notes`,
+    requestId
   });
 }
 
-async function getLatestAiReviewNote(projectId, mergeRequestIid) {
-  const notes = await getMergeRequestNotes(projectId, mergeRequestIid);
+async function getLatestAiReviewNote(projectId, mergeRequestIid, requestId) {
+  const notes = await getMergeRequestNotes(projectId, mergeRequestIid, requestId);
 
   return notes
     .filter((note) => isAiReviewNote(note.body))
