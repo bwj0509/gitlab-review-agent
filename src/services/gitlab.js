@@ -1,4 +1,4 @@
-const { GITLAB_BASE_URL, GITLAB_BOT_TOKEN } = require("../config/env");
+const { AI_REVIEW_MARKER, GITLAB_BASE_URL, GITLAB_BOT_TOKEN } = require("../config/env");
 
 async function gitlabApiRequest({ endpoint, method = "GET", body }) {
   if (!GITLAB_BASE_URL || !GITLAB_BOT_TOKEN) {
@@ -53,8 +53,38 @@ async function createMergeRequestNote(projectId, mergeRequestIid, body) {
   });
 }
 
+async function getMergeRequestNotes(projectId, mergeRequestIid) {
+  return gitlabApiRequest({
+    endpoint:
+      `/api/v4/projects/${encodeURIComponent(projectId)}` +
+      `/merge_requests/${encodeURIComponent(mergeRequestIid)}/notes`
+  });
+}
+
+async function getLatestAiReviewNote(projectId, mergeRequestIid) {
+  const notes = await getMergeRequestNotes(projectId, mergeRequestIid);
+
+  return notes
+    .filter((note) => isAiReviewNote(note.body))
+    .sort((a, b) => getNoteTimestamp(b) - getNoteTimestamp(a))[0];
+}
+
+function isAiReviewNote(noteBody) {
+  if (typeof noteBody !== "string") {
+    return false;
+  }
+
+  return noteBody.includes(AI_REVIEW_MARKER) || noteBody.includes("## AI Review (");
+}
+
+function getNoteTimestamp(note) {
+  const timestamp = Date.parse(note?.created_at || "");
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
 module.exports = {
   createMergeRequestNote,
+  getLatestAiReviewNote,
   getMergeRequest,
   getMergeRequestChanges
 };
