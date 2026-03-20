@@ -11,6 +11,7 @@ const OPENAI_MAX_OUTPUT_TOKENS = Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 
 const REVIEW_MAX_DIFF_CHARS = Number(process.env.REVIEW_MAX_DIFF_CHARS || 100000);
 const REVIEW_CHUNK_MAX_CHARS = Number(process.env.REVIEW_CHUNK_MAX_CHARS || 35000);
 const PREVIOUS_REVIEW_MAX_CHARS = Number(process.env.PREVIOUS_REVIEW_MAX_CHARS || 8000);
+const QUESTION_EXTRA_CONTEXT_MAX_FILES = Number(process.env.QUESTION_EXTRA_CONTEXT_MAX_FILES || 3);
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1/responses";
 const ALLOWED_ACTIONS = new Set(["open"]);
 const AI_REVIEW_MARKER = "<!-- ai-review-bot -->";
@@ -41,6 +42,7 @@ module.exports = {
   OPENAI_REASONING_EFFORT,
   PORT,
   PREVIOUS_REVIEW_MAX_CHARS,
+  QUESTION_EXTRA_CONTEXT_MAX_FILES,
   REVIEW_CHUNK_MAX_CHARS,
   REVIEW_MAX_DIFF_CHARS
 };

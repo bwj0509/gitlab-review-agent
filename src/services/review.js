@@ -1,4 +1,5 @@
 const { AI_REVIEW_MARKER, PREVIOUS_REVIEW_MAX_CHARS } = require("../config/env");
+const { collectQuestionContext } = require("../lib/contextCollector");
 const { buildReviewDiff } = require("../lib/diff");
 const { logInfo } = require("../lib/logger");
 const {
@@ -16,6 +17,7 @@ const {
   getLatestAiReviewNote,
   getMergeRequest,
   getMergeRequestChanges,
+  getRepositoryFile,
   getReviewGuideForMergeRequest
 } = require("./gitlab");
 const { generateReview } = require("./openai");
@@ -31,6 +33,10 @@ async function createReviewNote(projectId, mergeRequestIid, requestId, options =
       : Promise.resolve(null)
   ]);
   const reviewGuide = await getReviewGuideForMergeRequest(projectId, mergeRequest, requestId);
+  const questionContext =
+    responseMode === "question"
+      ? await collectQuestionExtraContext({ changes: changesPayload.changes || [], mergeRequest, projectId, requestId, userRequest })
+      : { files: [], text: "" };
 
   const relevantChanges =
     responseMode === "question" ? selectRelevantChanges(changesPayload.changes || [], userRequest) : changesPayload.changes || [];
@@ -50,7 +56,9 @@ async function createReviewNote(projectId, mergeRequestIid, requestId, options =
     hasPreviousReview: Boolean(previousReview),
     responseMode,
     hasUserRequest: Boolean(userRequest),
-    hasReviewGuide: Boolean(reviewGuide)
+    hasReviewGuide: Boolean(reviewGuide),
+    extraContextChars: questionContext.text.length,
+    extraContextFileCount: questionContext.files.length
   });
   const reviewText = await generateResponseText({
     mergeRequest,
@@ -60,6 +68,7 @@ async function createReviewNote(projectId, mergeRequestIid, requestId, options =
     requestId,
     responseMode,
     reviewDiff,
+    questionContext,
     reviewGuide,
     userRequest
   });
@@ -114,10 +123,20 @@ async function generateSingleReview({ mergeRequest, mergeRequestIid, previousRev
   });
 }
 
-async function generateSingleQuestion({ mergeRequest, mergeRequestIid, projectId, requestId, reviewDiff, reviewGuide, userRequest }) {
+async function generateSingleQuestion({
+  mergeRequest,
+  mergeRequestIid,
+  projectId,
+  requestId,
+  reviewDiff,
+  reviewGuide,
+  userRequest,
+  questionContext
+}) {
   const prompt = buildQuestionPrompt({
     mergeRequest,
     diffText: reviewDiff.promptDiffText,
+    extraContext: questionContext.text,
     reviewGuide,
     userRequest
   });
@@ -183,7 +202,16 @@ async function generateChunkedReview({ mergeRequest, mergeRequestIid, previousRe
   });
 }
 
-async function generateChunkedQuestion({ mergeRequest, mergeRequestIid, projectId, requestId, reviewDiff, reviewGuide, userRequest }) {
+async function generateChunkedQuestion({
+  mergeRequest,
+  mergeRequestIid,
+  projectId,
+  requestId,
+  reviewDiff,
+  reviewGuide,
+  userRequest,
+  questionContext
+}) {
   const chunkReviews = [];
 
   for (const chunk of reviewDiff.chunks) {
@@ -224,6 +252,7 @@ async function generateChunkedQuestion({ mergeRequest, mergeRequestIid, projectI
 
   const synthesisPrompt = buildQuestionChunkSynthesisPrompt({
     chunkReviews,
+    extraContext: questionContext.text,
     mergeRequest,
     reviewGuide,
     userRequest
@@ -246,13 +275,32 @@ async function generateResponseText({
   requestId,
   responseMode,
   reviewDiff,
+  questionContext,
   reviewGuide,
   userRequest
 }) {
   if (responseMode === "question") {
     return reviewDiff.mode === "single"
-      ? generateSingleQuestion({ mergeRequest, mergeRequestIid, projectId, requestId, reviewDiff, reviewGuide, userRequest })
-      : generateChunkedQuestion({ mergeRequest, mergeRequestIid, projectId, requestId, reviewDiff, reviewGuide, userRequest });
+      ? generateSingleQuestion({
+          mergeRequest,
+          mergeRequestIid,
+          projectId,
+          requestId,
+          reviewDiff,
+          reviewGuide,
+          userRequest,
+          questionContext
+        })
+      : generateChunkedQuestion({
+          mergeRequest,
+          mergeRequestIid,
+          projectId,
+          requestId,
+          reviewDiff,
+          reviewGuide,
+          userRequest,
+          questionContext
+        });
   }
 
   return reviewDiff.mode === "single"
@@ -280,6 +328,73 @@ function extractFileHints(userRequest) {
   }
 
   return [...userRequest.matchAll(/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+/g)].map((match) => match[0].toLowerCase());
+}
+
+async function collectQuestionExtraContext({ changes, mergeRequest, projectId, requestId, userRequest }) {
+  try {
+    return await collectQuestionContext({
+      changes,
+      getFileContent: async (filePath) => {
+        const sourceProjectId = mergeRequest?.source_project_id || projectId;
+        const sourceBranch = mergeRequest?.source_branch;
+        const targetBranch = mergeRequest?.target_branch;
+        if (!sourceProjectId || (!sourceBranch && !targetBranch)) {
+          logInfo("question_extra_context_skipped_missing_ref", {
+            requestId,
+            filePath,
+            sourceProjectId: sourceProjectId || null,
+            sourceBranch: sourceBranch || null,
+            targetBranch: targetBranch || null
+          });
+          return "";
+        }
+
+        const refsToTry = [sourceBranch, targetBranch].filter(Boolean);
+
+        for (const ref of refsToTry) {
+          const file = await getRepositoryFile(sourceProjectId, filePath, ref, requestId);
+          if (!file?.content) {
+            logInfo("question_extra_context_file_not_found", {
+              requestId,
+              filePath,
+              projectId: sourceProjectId,
+              ref
+            });
+            continue;
+          }
+
+          try {
+            const content = Buffer.from(file.content, "base64").toString("utf8");
+            logInfo("question_extra_context_file_loaded", {
+              requestId,
+              filePath,
+              projectId: sourceProjectId,
+              ref,
+              contentChars: content.length
+            });
+            return content;
+          } catch (error) {
+            logInfo("question_extra_context_decode_failed", {
+              requestId,
+              filePath,
+              projectId: sourceProjectId,
+              ref,
+              message: error.message
+            });
+          }
+        }
+
+        return "";
+      },
+      userRequest
+    });
+  } catch (error) {
+    logInfo("question_extra_context_failed", {
+      requestId,
+      message: error.message
+    });
+    return { files: [], text: "" };
+  }
 }
 
 module.exports = {

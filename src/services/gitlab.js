@@ -155,5 +155,6 @@ module.exports = {
   getLatestAiReviewNote,
   getMergeRequest,
   getMergeRequestChanges,
+  getRepositoryFile,
   getReviewGuideForMergeRequest
 };

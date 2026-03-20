@@ -103,12 +103,21 @@ function buildReviewPrompt({ mergeRequest, diffText, previousReview, reviewGuide
   return buildInitialReviewPrompt({ mergeRequest, diffText, reviewGuide });
 }
 
-function buildQuestionPrompt({ mergeRequest, diffText, reviewGuide, userRequest }) {
+function buildQuestionPrompt({ mergeRequest, diffText, reviewGuide, userRequest, extraContext }) {
   return [
     "You are a senior engineer answering a question about a GitLab merge request.",
+    "This answer will be posted as a GitLab MR note, so keep it concise and easy to scan.",
     "Focus on the user's requested file, code path, or risk.",
     "Base the answer only on the merge request metadata and diff provided.",
+    "When Related code context includes the full content of a directly mentioned file, treat that file as fully read.",
     "If the requested target is not present in the diff or the available context is insufficient, say that clearly.",
+    "Keep the answer concise by default.",
+    "If the topic is broad, lead with the conclusion and include only the most important 2 to 4 points.",
+    "Prefer omitting secondary details over giving an exhaustive explanation.",
+    "Do not explain every type, field, or example one by one unless the user explicitly asks for that level of detail.",
+    "For comparison questions, summarize the difference first and then list at most 3 concrete differences.",
+    "For refactoring questions, prioritize the top 2 or 3 improvements rather than listing every possible cleanup.",
+    "If more detail would be needed for full coverage, mention that briefly in the check-points section instead of expanding the main answer.",
     "Respond in Korean.",
     "",
     "Output format:",
@@ -124,7 +133,7 @@ function buildQuestionPrompt({ mergeRequest, diffText, reviewGuide, userRequest 
     "",
     `User request: ${userRequest}`,
     "",
-    formatMergeRequestContext({ diffLabel: "Relevant diff", diffText, mergeRequest, reviewGuide })
+    formatMergeRequestContext({ diffLabel: "Relevant diff", diffText, extraContext, mergeRequest, reviewGuide })
   ].join("\n");
 }
 
@@ -232,11 +241,20 @@ function buildQuestionChunkPrompt({ chunkDiffText, chunkIndex, chunkCount, merge
   ].join("\n");
 }
 
-function buildQuestionChunkSynthesisPrompt({ chunkReviews, mergeRequest, reviewGuide, userRequest }) {
+function buildQuestionChunkSynthesisPrompt({ chunkReviews, mergeRequest, reviewGuide, userRequest, extraContext }) {
   return [
     "You are synthesizing chunk-level answers for a user question about a GitLab merge request.",
     "Use only the chunk answers below.",
+    "This answer will be posted as a GitLab MR note, so keep it concise and easy to scan.",
+    "When Related code context includes the full content of a directly mentioned file, treat that file as fully read.",
     "If the question cannot be answered confidently from the available diff, say that clearly.",
+    "Keep the answer concise by default.",
+    "If the topic is broad, lead with the conclusion and include only the most important 2 to 4 points.",
+    "Prefer omitting secondary details over giving an exhaustive explanation.",
+    "Do not explain every type, field, or example one by one unless the user explicitly asks for that level of detail.",
+    "For comparison questions, summarize the difference first and then list at most 3 concrete differences.",
+    "For refactoring questions, prioritize the top 2 or 3 improvements rather than listing every possible cleanup.",
+    "If more detail would be needed for full coverage, mention that briefly in the check-points section instead of expanding the main answer.",
     "Respond in Korean.",
     "",
     "Output format:",
@@ -253,6 +271,7 @@ function buildQuestionChunkSynthesisPrompt({ chunkReviews, mergeRequest, reviewG
     `Merge request title: ${mergeRequest.title || ""}`,
     `User request: ${userRequest}`,
     "",
+    formatExtraContextSection(extraContext),
     "Review guide:",
     reviewGuide || "(no repository-specific review guide provided)",
     "",
@@ -314,7 +333,7 @@ function formatChunkReviewsForPrompt(chunkReviews) {
     .join("\n\n---\n\n");
 }
 
-function formatMergeRequestContext({ diffLabel, diffText, mergeRequest, reviewGuide }) {
+function formatMergeRequestContext({ diffLabel, diffText, extraContext, mergeRequest, reviewGuide }) {
   return [
     `Merge request title: ${mergeRequest.title || ""}`,
     `Source branch: ${mergeRequest.source_branch || ""}`,
@@ -322,12 +341,23 @@ function formatMergeRequestContext({ diffLabel, diffText, mergeRequest, reviewGu
     "Description:",
     mergeRequest.description || "(no description)",
     "",
+    formatExtraContextSection(extraContext),
     "Review guide:",
     reviewGuide || "(no repository-specific review guide provided)",
     "",
     `${diffLabel}:`,
     diffText
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatExtraContextSection(extraContext) {
+  if (!extraContext) {
+    return "";
+  }
+
+  return ["Related code context:", extraContext, ""].join("\n");
 }
 
 function buildReviewBody(reviewText) {
