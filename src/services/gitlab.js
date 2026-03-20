@@ -45,6 +45,18 @@ async function gitlabApiRequest({ endpoint, method = "GET", body, requestId }) {
   return response.json();
 }
 
+async function gitlabApiRequestOrNull(options) {
+  try {
+    return await gitlabApiRequest(options);
+  } catch (error) {
+    if (error.message.startsWith("GitLab API error 404:")) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
 async function getMergeRequest(projectId, mergeRequestIid, requestId) {
   return gitlabApiRequest({
     endpoint:
@@ -91,12 +103,46 @@ async function getLatestAiReviewNote(projectId, mergeRequestIid, requestId) {
     .sort((a, b) => getNoteTimestamp(b) - getNoteTimestamp(a))[0];
 }
 
+async function getRepositoryFile(projectId, filePath, ref, requestId) {
+  return gitlabApiRequestOrNull({
+    endpoint:
+      `/api/v4/projects/${encodeURIComponent(projectId)}` +
+      `/repository/files/${encodeURIComponent(filePath)}?ref=${encodeURIComponent(ref)}`,
+    requestId
+  });
+}
+
+async function getReviewGuideForMergeRequest(projectId, mergeRequest, requestId) {
+  const sourceProjectId = mergeRequest?.source_project_id || projectId;
+  const sourceBranch = mergeRequest?.source_branch;
+  if (!sourceProjectId || !sourceBranch) {
+    return "";
+  }
+
+  const file = await getRepositoryFile(sourceProjectId, "CODEREVIEW.md", sourceBranch, requestId);
+  if (!file?.content) {
+    return "";
+  }
+
+  try {
+    return Buffer.from(file.content, "base64").toString("utf8").trim();
+  } catch (error) {
+    logError("gitlab_review_guide_decode_failed", {
+      requestId,
+      sourceProjectId,
+      sourceBranch,
+      message: error.message
+    });
+    return "";
+  }
+}
+
 function isAiReviewNote(noteBody) {
   if (typeof noteBody !== "string") {
     return false;
   }
 
-  return noteBody.includes(AI_REVIEW_MARKER) || noteBody.includes("## AI Review (");
+  return noteBody.includes(AI_REVIEW_MARKER) && noteBody.includes("## AI Review (");
 }
 
 function getNoteTimestamp(note) {
@@ -108,5 +154,6 @@ module.exports = {
   createMergeRequestNote,
   getLatestAiReviewNote,
   getMergeRequest,
-  getMergeRequestChanges
+  getMergeRequestChanges,
+  getReviewGuideForMergeRequest
 };
